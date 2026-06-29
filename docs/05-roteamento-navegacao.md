@@ -73,6 +73,14 @@ src/app/
 
 Convenções de segmento dinâmico: `[id]` (um parâmetro), `[...path]` (catch-all), `[[...path]]` (catch-all opcional).
 
+### 3.1 `basePath /app` e domínio do cliente
+
+A aplicação roda sob **`/app`** (`basePath: '/app'` no `next.config.ts`) — assim, no domínio próprio do cliente (`www.cliente1.com.br/app`) a raiz fica livre para o site institucional. As URLs acima são **relativas ao basePath** (ex.: `/analises` resolve para `/app/analises`). O mesmo bundle serve qualquer host; a marca é resolvida por host (data-driven). Fallback: subdomínio da plataforma (`cliente1.wecorp.com.br/app`). Ver [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md) §7 e [`./14-deploy-ambiente.md`](./14-deploy-ambiente.md).
+
+### 3.2 Branding por host nos layouts (login pré-auth, sem FOUC)
+
+O **root layout** e os layouts `(auth)`/`(public)` resolvem o branding **por host no servidor** e injetam as variáveis CSS no `<html>` + `generateMetadata` (title/description/OG/**favicon**) por host. Resultado: a **tela de login já aparece tematizada** com a marca do cliente, sem flash. Detalhe em [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md) §5.
+
 ---
 
 ## 4. `params` e `searchParams` como `Promise`

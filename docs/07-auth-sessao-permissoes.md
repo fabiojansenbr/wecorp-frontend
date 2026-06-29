@@ -60,6 +60,10 @@ export async function clearSessionCookies() {
 
 > **`secure` em dev:** relaxado quando `NODE_ENV !== 'production'` para permitir HTTP local. Em produção é sempre `true`.
 
+> **Domínio próprio do cliente:** com white-label por host (`www.cliente1.com.br/app`), os cookies de sessão são gravados **no host atual** — cada domínio tem sua própria sessão (não há cookie cross-domain). Não fixe `domain` para um host específico no código: deixe o cookie no host da requisição. Ver [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md).
+
+> **Login tematizado (pré-auth):** a tela de login recebe logo/cores/fundo/textos do cliente **antes** de existir sessão, via endpoint público de branding resolvido por host (sem FOUC, SSR). Ver [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md) §4–5.
+
 ---
 
 ## 3. `proxy.ts` (middleware Next 16)
