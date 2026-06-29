@@ -2,6 +2,8 @@
 
 > Conjunto de telas públicas (sem login) que o proponente/inquilino acessa por link com **token** para preencher a proposta de Seguro Fiança, a Ficha de Análise Cadastral, visualizar assinatura eletrônica (O2 Sign), responder cotação de seguro condomínio/inspeção predial, validar autenticidade de uma análise e (parcialmente) autocadastrar-se como novo proponente. Tudo roda no controller `FormularioswebController` + `ValidaanalisesController`, com layout `default_painel_cliente` e o JS `Contratoseguros/js/segurofianca.js`.
 
+> **Anexos/Upload:** o widget de upload de documentos do proponente apoia-se no subsistema transversal de arquivos do backend — mecanismo, token-gate e storage documentados em [`../../../backend/docs/legado/anexos-upload.md`](../../../backend/docs/legado/anexos-upload.md).
+
 ## Cobertura
 Controllers:
 - `app/Controller/FormularioswebController.php` (god file ~2.975 linhas) — métodos: `beforeFilter`, `index`, `index_analise`, `proponentefianca`, `addproponente`, `buscarpessoa`, `buscarpessoaanalise`, `enviarproposta`, `enviaranalise`, `pdf_propostafianca`, `segurocondo`, `enviarpropsegurocondo`, `index_segurocondo`, `validaFianca`, `authFormularioweb`, `analisecadastral`, `o2sign`.
