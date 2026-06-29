@@ -24,7 +24,7 @@ O **frontend weCorp** é a interface web do **weCorp** — um **SaaS B2B** para 
 O frontend é simultaneamente:
 
 - **Multi-tenant** — várias empresas operam na mesma aplicação, com isolamento garantido pelo backend (escopo) e refletido na UI (dados e permissões do usuário logado).
-- **White-label** — cada marca é servida de um domínio próprio, com identidade visual customizada via variáveis CSS, **sem rebuild**. Ver [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md).
+- **White-label por cliente** — **cada cliente pode ter um domínio próprio e uma marca exclusiva** (logo, cores, particularidades) **já na tela de login**, antes de autenticar. A marca é resolvida por **host**, de forma **data-driven** (qualquer empresa via `dominio_corporativo`), com tema por variáveis CSS — **sem rebuild**. As 8 marcas SaaS são os *defaults*; o cliente refina. Ver [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md).
 - **Mobile-first** — layouts pensados primeiro para telas pequenas, expandindo para desktop.
 
 ## 2. Quem usa (público-alvo)

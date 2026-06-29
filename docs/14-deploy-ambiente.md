@@ -184,6 +184,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   output: 'standalone',          // imagem Docker mínima (server.js autocontido)
+  basePath: '/app',              // app vive em /app no domínio do cliente (www.cliente1.com.br/app)
   turbopack: {},                 // dev
   experimental: {
     optimizePackageImports: [    // tree-shaking agressivo de libs pesadas
@@ -207,7 +208,31 @@ export default nextConfig;
 
 - **`output: 'standalone'`** — habilita a imagem Docker da §4.
 - **`optimizePackageImports`** — reduz JS enviado ao cliente (objetivo de performance, [00](./00-visao-geral.md) §3).
-- **`images.remotePatterns`** — só domínios reais; nada de wildcard aberto.
+- **`images.remotePatterns`** — só domínios reais; nada de wildcard aberto. Logos white-label dos clientes vêm do **host de storage do backend** (um único host), não do domínio de cada cliente — então não é preciso listar o domínio de cada cliente aqui.
+
+---
+
+## 5.1 Domínios customizados (custom domains) + TLS
+
+O white-label por cliente exige que **`www.cliente1.com.br/app`** sirva o **mesmo deploy**, resolvendo a marca por host (ver [`./06-multitenancy-whitelabel.md`](./06-multitenancy-whitelabel.md)). O **provedor de TLS será decidido depois**; o projeto deve ficar **agnóstico** e preparado para qualquer das opções abaixo.
+
+**Onboarding de um cliente (sem rebuild):**
+1. Cadastrar `Empresa.dominio_corporativo` no backend (índice único).
+2. Cliente cria um **`CNAME`** (ou `A`/`ALIAS` no apex) do seu domínio apontando para a plataforma.
+3. **Provisionar TLS** para esse domínio (uma das opções abaixo).
+4. A marca entra no ar — nenhuma alteração de código/deploy.
+
+**Opções de TLS/roteamento (escolher depois):**
+
+| Opção | Como funciona | Quando faz sentido |
+|-------|---------------|--------------------|
+| **Cloudflare for SaaS (SSL for SaaS)** | Cliente faz CNAME para um hostname de fallback nosso; a Cloudflare emite/renova o cert por domínio automaticamente e roteia para a origem. | Muitos domínios em **infra própria**, sem operar ACME. |
+| **Plataforma gerenciada (Vercel/Netlify)** | "Custom domains" da plataforma com TLS automático. | Deploy gerenciado; menos controle de infra. |
+| **Reverse proxy próprio (Traefik/Caddy/Nginx)** | Emissão **on-demand** de certificados via Let's Encrypt (ACME) ao receber o 1º request do domínio. | Máximo controle; aceita operar ACME/renovação. |
+
+**Fallback imediato:** subdomínio da plataforma (`cliente1.wecorp.com.br/app`) com **wildcard TLS** (`*.wecorp.com.br`) — funciona na hora, enquanto o domínio próprio é configurado/propaga.
+
+**Segurança (allowlist de hosts):** o backend só responde branding/sessão para hosts **provisionados** (cadastrados como `dominio_corporativo` ou subdomínio de marca). Host desconhecido → fallback ou 404 (mitiga *host header injection* e branding indevido). Ver [`../../backend/docs/14-deploy-ambiente.md`](../../backend/docs/14-deploy-ambiente.md).
 
 ---
 

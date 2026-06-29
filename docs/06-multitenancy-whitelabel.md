@@ -1,6 +1,6 @@
 # 06 — Multi-tenancy e White-label
 
-> O frontend weCorp serve **8 marcas** a partir do mesmo código, cada uma de um domínio próprio, com identidade visual customizada — **sem rebuild**. Várias empresas operam na mesma aplicação; o **isolamento de dados é garantido pelo backend**, e o frontend apenas **reflete** os dados e permissões do usuário logado.
+> O frontend weCorp serve **muitos clientes a partir do mesmo código**, cada um podendo ter **domínio próprio e marca exclusiva** — com logo, cores e particularidades **já na tela de login** (antes de autenticar), **sem rebuild**. Várias empresas operam na mesma aplicação; o **isolamento de dados é garantido pelo backend**, e o frontend apenas **reflete** os dados e permissões do usuário logado.
 > Regras não-negociáveis em [`../CLAUDE.md`](../CLAUDE.md) §5. Escopo de tenant no backend em [`../../backend/docs/06-multi-tenancy.md`](../../backend/docs/06-multi-tenancy.md).
 
 ---
@@ -10,128 +10,130 @@
 | Conceito | Pergunta que responde | Onde mora |
 |----------|-----------------------|-----------|
 | **Multi-tenancy** | *Quais dados este usuário pode ver?* | **Backend** (escopo por `empresaId`/`saasId`). O frontend só consome o que a API devolve. |
-| **White-label** | *Com que cara (logo, cor, fonte) a aplicação aparece?* | **Frontend** (marca detectada por host → variáveis CSS). |
+| **White-label** | *Com que cara (logo, cor, fonte, domínio) a aplicação aparece?* | **Frontend** (marca resolvida por host → variáveis CSS), com os dados de marca vindos do **backend**. |
 
-> Princípio não-negociável: o frontend **nunca** reimplementa o isolamento de tenant. Ele não decide "filtrar dados da empresa X" — quem faz isso é o backend, com filtro de escopo explícito em todo `where`. O frontend confia no contrato e exibe o que recebe (ver `backend/docs/06`). Vazar dado entre tenants é responsabilidade do servidor; o frontend não pode "consertar" nem "burlar" isso.
-
----
-
-## 2. Multi-tenancy do lado do frontend
-
-O weCorp é um SaaS B2B multi-tenant: muitas empresas (imobiliárias, corretoras, administradoras, seguradoras) usam a mesma instância. O que o frontend faz:
-
-- **Resolve a sessão no servidor** (cookies httpOnly + `getServerSession()`), obtendo `user`, `empresa`, `grupo_id` e `permissoes`.
-- **Reflete** dados e ações conforme essa sessão: listagens trazem só o escopo do usuário (porque o backend escopou), e o menu/ações são filtrados pela ACL dos **10 grupos** (`PermissionGate` + `hasAccess`). Ver [`./07-auth-sessao-permissoes.md`](./07-auth-sessao-permissoes.md).
-- **Não** envia `empresa_id`/`saas_id` no body/query para "escolher" tenant — o escopo vem **sempre** do token, no servidor.
-
-> Relação com o backend: o token carrega `{ userId, empresaId, saasId, grupoId }`; o backend aplica defesa em profundidade (service explícito + AsyncLocalStorage + extensão Prisma). Cross-tenant de leitura no backend retorna **404** (anti-enumeração). O frontend só precisa tratar o envelope `{data}`/`{data,meta}`/`{error}`. Detalhes: [`../../backend/docs/06-multi-tenancy.md`](../../backend/docs/06-multi-tenancy.md).
+> Princípio não-negociável: o frontend **nunca** reimplementa o isolamento de tenant. Ele não decide "filtrar dados da empresa X" — quem faz isso é o backend, com filtro de escopo explícito em todo `where`. A resolução de marca por host é **apresentação**, não segurança: trocar o host muda a *cara*, nunca o *escopo de dados* (que vem sempre do token). Ver `backend/docs/06`.
 
 ---
 
-## 3. White-label: detecção da marca por host
+## 2. Premissa: cada cliente com aplicação exclusiva
 
-A marca é detectada pelo **HOST** da requisição no `proxy.ts` (o middleware do Next 16 — substitui `middleware.ts`). O proxy roda na borda, identifica o tenant e o **propaga** via cookie/header para os layouts/Server Components.
+Requisito de produto inegociável: ao acessar **`www.cliente1.com.br/app`**, o usuário vê — **já no login** — o logo, as cores e as particularidades do cliente 1; em **`www.cliente2.com.br/app`**, as do cliente 2. Isso implica três propriedades:
+
+1. **Branding por domínio próprio, por cliente** (não só pelas marcas SaaS) — resolvido de forma **data-driven** (qualquer empresa pode ter o seu).
+2. **Branding pré-autenticação** — a marca aparece **antes** de existir sessão (na tela de login), resolvida só pelo **host**.
+3. **Sem rebuild** — adicionar um cliente é cadastrar um domínio + apontar DNS; nenhuma alteração de código.
+
+---
+
+## 3. Resolução de tenant por host (data-driven)
+
+A marca é resolvida pelo **HOST** da requisição, em duas etapas (borda + servidor), nesta **ordem de precedência**:
+
+1. **Domínio próprio do cliente** — `host == Empresa.dominio_corporativo` (match exato, índice único no backend) → branding **da empresa** (cliente exclusivo). É o caso de `www.cliente1.com.br`.
+2. **Marca SaaS (default)** — o sufixo do host casa uma das marcas SaaS (`*.wecorp.com.br`, `*.hubstate.com.br`, …) → branding **da marca** (§6).
+3. **Fallback** — host não provisionado → marca padrão **ou** página de "domínio não configurado" (conforme a allowlist; ver §8).
+
+> A antiga lista fixa de 8 marcas no código (`src/configs/tenants`) **não é mais a fonte única**: ela vira apenas o **seed de defaults das marcas SaaS** e o fallback de `localhost` em dev. A fonte da verdade de quem-tem-qual-domínio é o **backend** (`Empresa.dominio_corporativo`), consultado via endpoint público (§4).
 
 ```typescript
-// src/proxy.ts (trecho — detecção de marca por host)
+// src/proxy.ts (trecho — resolução por host, na borda)
 import { NextRequest, NextResponse } from 'next/server';
-import { detectTenantByHost } from '@/configs/tenants';
+import { resolveBrandingByHost } from '@/configs/tenants'; // consulta o endpoint público com cache TTL
 
-export function proxy(req: NextRequest) {
-  const tenant = detectTenantByHost(req.headers.get('host')); // → { id, theme, ... }
+export async function proxy(req: NextRequest) {
+  const host = req.headers.get('host');
+  const branding = await resolveBrandingByHost(host); // { saasId, empresaId?, theme, seo, login, features }
 
   const res = NextResponse.next();
-  res.headers.set('x-tenant', tenant.id);                     // disponível ao layout
-  res.cookies.set('tenant', tenant.id, { sameSite: 'lax', path: '/' });
+  res.headers.set('x-tenant-host', host ?? '');         // o layout (RSC) re-resolve no servidor
   return res;
 }
 ```
 
-```typescript
-// src/configs/tenants/index.ts (esboço)
-export function detectTenantByHost(host: string | null): Tenant {
-  const h = (host ?? '').toLowerCase();
-  return tenants.find((t) => t.domains.some((d) => h.endsWith(d))) ?? tenants.localhost;
+---
+
+## 4. Endpoint público de branding (habilita o login tematizado)
+
+Como o login acontece **sem sessão**, o tema precisa vir de um endpoint **público** (sem auth), resolvido pelo host:
+
+```
+GET /api/public/branding        (resolve pelo header Host; aceita ?host= para dev)
+```
+
+Resposta (payload completo da "exclusividade"):
+
+```jsonc
+{
+  "saasId": "…",
+  "empresaId": "…|null",                 // null quando é só a marca SaaS
+  "theme":  { "primary", "primaryForeground", "secondary", "radius", "fontSans", "logoUrl", "brandName" },
+  "seo":    { "title", "description", "ogImage", "faviconUrl" },
+  "login":  { "background", "welcome", "supportEmail", "termsUrl" },
+  "features": { "seguros": true, "analises": true, "vistorias": false /* … flags por empresa */ }
 }
 ```
 
-> A detecção por host é o caso normal. Há ainda **override por `empresa_id` do usuário logado**: se a empresa tiver `url_logotipo`/tema próprio (campo do modelo `Empresa`), o branding da empresa prevalece sobre o branding genérico da marca após o login. A marca define o *default*; a empresa pode refinar.
+- **Público e cacheável:** `Cache-Control` curto + `s-maxage` (a resposta é por host, barata e não sensível). O `proxy.ts`/layout cacheiam por TTL na borda.
+- **Sem PII** e **com allowlist de hosts** (§8).
+- Backend: ver [`../../backend/docs/09-modulos-dominio.md`](../../backend/docs/09-modulos-dominio.md) (módulo Empresas) — resolução `dominio_corporativo`→empresa, com fallback para os defaults da marca SaaS.
 
 ---
 
-## 4. Aplicação do tema por variáveis CSS
+## 5. Branding pré-autenticação (login) **sem FOUC**
 
-A identidade visual é aplicada **exclusivamente por variáveis CSS** no `<html>` — **nunca** por hex hardcoded em componentes. Trocar de marca = trocar os valores das variáveis; o código de UI não muda. É isso que viabiliza **trocar de tenant sem rebuild**.
+A marca **MUST** aparecer já no primeiro paint do login — nada de "piscar" o tema genérico e depois trocar. Por isso o tema é resolvido **no servidor**, não no client:
 
-Tokens de marca:
+- **Layout raiz / `(auth)` / `(public)` (Server Components):** buscam o branding por host (endpoint §4, com `cache` do React) e injetam:
+  - as **variáveis CSS** no `<html>` (cor, fonte, raio, logo) — todo o shadcn/Tailwind passa a usar a cor da marca;
+  - **`generateMetadata`** por host → `title`, `description`, Open Graph e **favicon** com a cara do cliente.
+- A **tela de login** consome `login.*` (fundo, texto de boas-vindas, e-mail de suporte, termos) e `theme.logoUrl`.
+- **Proibido** detectar marca no client (`window.location`) para tematizar — chega tarde (flash) e fora do fluxo. A detecção é por host, no servidor/borda.
+
+```tsx
+// src/app/layout.tsx (RSC) — injeta tema do host já no HTML do servidor
+import { getBrandingByHost } from '@/configs/tenants/server';
+
+export async function generateMetadata() {
+  const b = await getBrandingByHost();
+  return { title: b.seo.title, description: b.seo.description,
+           icons: { icon: b.seo.faviconUrl }, openGraph: { images: [b.seo.ogImage] } };
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const b = await getBrandingByHost();
+  const style = {
+    ['--color-primary' as string]: b.theme.primary,
+    ['--logo-url' as string]: `url('${b.theme.logoUrl}')`,
+    ['--brand-name' as string]: `'${b.theme.brandName}'`,
+    ['--radius' as string]: b.theme.radius,
+    ['--font-sans' as string]: b.theme.fontSans,
+  };
+  return <html lang="pt-BR" style={style}><body>{children}</body></html>;
+}
+```
+
+> Após o login, o `TenantProvider` recebe o mesmo payload (agora podendo refinar com dados da empresa do usuário) e mantém logo/cores no app autenticado. A regra permanece: **cor sempre via variável CSS — nunca hex inline**.
+
+---
+
+## 6. Tokens de tema (variáveis CSS) e marcas SaaS (defaults)
+
+A identidade é aplicada **exclusivamente por variáveis CSS** no `<html>`. Tokens:
 
 | Variável | Papel |
 |----------|-------|
-| `--color-primary` | Cor primária da marca. |
-| `--color-primary-foreground` | Cor do texto/ícone sobre a primária. |
-| `--logo-url` | URL do logotipo (usado em `Sidebar`/`Topbar`/portal). |
-| `--brand-name` | Nome exibível da marca. |
+| `--color-primary` / `--color-primary-foreground` | Cor primária da marca e do texto sobre ela. |
+| `--logo-url` | URL do logotipo (login, Sidebar/Topbar, portal). |
+| `--brand-name` | Nome exibível. |
 | `--radius` | Raio de borda padrão (shadcn). |
 | `--font-sans` | Família de fonte da marca. |
 
-### 4.1 `globals.css` — valores default
+`globals.css` define apenas os **defaults** (marca weCorp); o host sobrescreve em runtime via §5.
 
-```css
-/* app/globals.css */
-@import 'tailwindcss';
-@import 'tw-animate-css';
+As **marcas SaaS** (defaults por sufixo de host) seguem o spec `frontend.md` 1.5. Elas são o ponto de partida; **cada empresa cliente pode ter domínio próprio** que sobrepõe esses defaults.
 
-:root {
-  --color-primary: 220 90% 50%;          /* default weCorp */
-  --color-primary-foreground: 0 0% 100%;
-  --color-secondary: 220 14% 96%;
-  --radius: 0.5rem;
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --logo-url: url('/logos/wecorp.svg');
-  --brand-name: 'weCorp';
-}
-```
-
-### 4.2 Aplicação no `<html>` via TenantProvider
-
-O layout autenticado (e o público) injeta os tokens do tenant resolvido como `style` inline no elemento raiz. Como são variáveis CSS, todo o shadcn/Tailwind passa a usar a cor da marca automaticamente.
-
-```tsx
-// src/providers/tenant-provider.tsx ('use client')
-'use client';
-import { createContext, useContext } from 'react';
-
-const TenantContext = createContext<Tenant | null>(null);
-export const useTenant = () => useContext(TenantContext);
-
-export function TenantProvider({ tenant, children }: { tenant: Tenant; children: React.ReactNode }) {
-  return (
-    <TenantContext.Provider value={tenant}>
-      <div
-        style={{
-          ['--color-primary' as string]: tenant.theme.primary,
-          ['--logo-url' as string]: `url('${tenant.theme.logo}')`,
-          ['--brand-name' as string]: `'${tenant.name}'`,
-          ['--radius' as string]: tenant.theme.radius,
-          ['--font-sans' as string]: tenant.theme.fontSans,
-        }}
-      >
-        {children}
-      </div>
-    </TenantContext.Provider>
-  );
-}
-```
-
-> `TenantContext` é provido no layout autenticado (e no layout público), uma única vez. Componentes que precisam do nome/logo da marca usam `useTenant()`; componentes que só precisam da cor usam as variáveis CSS diretamente (`bg-primary`, `text-primary-foreground` etc.). **Regra:** cor **sempre** via variável CSS — nunca hex inline.
-
----
-
-## 5. As 8 marcas (+ localhost dev)
-
-Mapa de marca → domínio → logo → cor primária. Fonte: `frontend.md` Parte 1.5.
-
-| Marca | Domínio | Logo | Cor primária |
+| Marca SaaS | Domínio (sufixo) | Logo | Cor primária |
 |-------|---------|------|--------------|
 | weCorp | `*.wecorp.com.br` | `/logos/wecorp.svg` | `#1e40af` |
 | Hubstate | `*.hubstate.com.br` | `/logos/hubstate.svg` | `#0f766e` |
@@ -143,42 +145,36 @@ Mapa de marca → domínio → logo → cor primária. Fonte: `frontend.md` Part
 | Upgrade Garantia | `*.upgradegarantia.com.br` | `/logos/upgrade.svg` | `#ea580c` |
 | Localhost (dev) | `localhost:*` | `/logos/hubstate.svg` | `#0f766e` |
 
-> As 8 marcas correspondem aos `saasId` que particionam o universo white-label no backend (ver `backend/docs/06` §1). `localhost` é apenas conveniência de desenvolvimento e cai no tema da Hubstate.
+> As marcas SaaS correspondem aos `saasId` que particionam o universo white-label no backend (`backend/docs/06` §1). Um **cliente** (`empresaId`) pertence a um `saasId` e pode, opcionalmente, ter `dominio_corporativo` próprio para exclusividade total.
 
 ---
 
-## 6. Troca de tenant sem rebuild
+## 7. Domínio próprio do cliente: onboarding e URL
 
-A independência de marca (objetivo nº 5 do produto) vem de duas propriedades combinadas:
-
-1. **Mesmo bundle, vários hosts.** O `proxy.ts` resolve o tenant em runtime por host; não há build por marca.
-2. **Tema 100% em variáveis CSS.** Mudar logo/cor/fonte é mudar valores de variáveis injetadas no `<html>` — nenhum componente referencia uma marca específica.
-
-Consequências práticas:
-
-- Adicionar uma marca = adicionar uma entrada em `src/configs/tenants/` + assets em `public/logos/`. Sem alterar componentes.
-- `next.config.ts` → `images.remotePatterns` deve cobrir os domínios reais de produção das marcas, se as logos vierem de URL remota.
-- Logos locais ficam em `public/logos/` e são referenciadas por `--logo-url`.
+- **URL:** a aplicação roda em **`/app`** do domínio do cliente (`www.cliente1.com.br/app`) — `basePath: '/app'` no `next.config.ts`. A raiz fica livre para o site institucional do cliente. Ver [`./05-roteamento-navegacao.md`](./05-roteamento-navegacao.md) e [`./14-deploy-ambiente.md`](./14-deploy-ambiente.md).
+- **Fallback imediato:** subdomínio da plataforma (`cliente1.wecorp.com.br`) com **wildcard TLS** funciona enquanto o domínio próprio é configurado/propagado.
+- **Onboarding (sem rebuild):** cadastrar `Empresa.dominio_corporativo` → cliente aponta `CNAME`/`A` para a plataforma → provisionar TLS (estratégia agnóstica em [`./14-deploy-ambiente.md`](./14-deploy-ambiente.md)) → marca no ar. Nenhuma alteração de código/deploy.
 
 ---
 
-## 7. Armadilhas comuns
+## 8. Troca/onboarding sem rebuild + segurança
+
+**Sem rebuild** vem de: (1) mesmo bundle para todos os hosts; (2) tema 100% em variáveis CSS; (3) mapeamento host→empresa **data-driven** (banco), não código.
 
 | Armadilha | Por que falha | Correção |
 |-----------|---------------|----------|
-| Hex de cor inline no componente | Quebra white-label; a marca não troca a cor. | Usar `bg-primary`/variável CSS. |
-| Confiar no frontend para "filtrar" tenant | O isolamento é do backend; filtro no client é burlável. | Consumir o escopo que a API já devolve. |
-| Enviar `empresa_id`/`saas_id` no body para escolher tenant | Cliente forja escopo. | Escopo vem do token, no servidor. |
-| Espelhar sessão/JWT no Zustand | Vaza dado sensível ao client; duplica fonte de verdade. | `getServerSession()` no servidor; Zustand só UI. |
-| Detectar marca no client (`window.location`) | Tarde demais (flash) e fora do `proxy.ts`. | Detectar no `proxy.ts` por host; injetar no layout. |
-| Hardcodar logo da weCorp | Quebra nas outras 7 marcas. | `--logo-url` via TenantProvider. |
+| Hex de cor inline no componente | Quebra white-label. | `bg-primary`/variável CSS. |
+| Lista fixa de domínios no código | Cada cliente novo exigiria deploy. | Resolver por `dominio_corporativo` (banco) via endpoint público. |
+| Tematizar no client (`window.location`) | Flash (FOUC) e tarde demais. | Resolver por host no servidor/borda; injetar no `<html>`. |
+| Confiar no host para "filtrar" dados | Host é apresentação, não segurança. | Escopo vem do token; isolamento no backend. |
+| Aceitar qualquer Host | Host header injection / branding indevido. | **Allowlist** de hosts provisionados; host desconhecido → fallback/404. |
+| Cookie de sessão sem `domain` correto | Login não persiste no domínio próprio. | Cookie escopado ao host do cliente. Ver [`./07-auth-sessao-permissoes.md`](./07-auth-sessao-permissoes.md). |
+| Hardcodar logo/título da weCorp | Quebra nos demais clientes. | `--logo-url`/`generateMetadata` por host. |
 
 ---
 
-## 8. Ver também
+## 9. Ver também
 
-- [01 — Arquitetura](./01-arquitetura.md) · [02 — Stack](./02-stack-tecnologico.md)
-- [05 — Roteamento e navegação](./05-roteamento-navegacao.md) · [07 — Auth, sessão e permissões](./07-auth-sessao-permissoes.md)
-- [04 — Design system e UI](./04-design-system-ui.md) · [08 — Consumo de API e dados](./08-consumo-api-dados.md)
-- Backend: [`../../backend/docs/06-multi-tenancy.md`](../../backend/docs/06-multi-tenancy.md)
-</content>
+- [05 — Roteamento e navegação](./05-roteamento-navegacao.md) (basePath `/app`, metadata por host) · [07 — Auth, sessão e permissões](./07-auth-sessao-permissoes.md) (login pré-auth, cookies por domínio)
+- [14 — Deploy e ambiente](./14-deploy-ambiente.md) (domínios customizados + TLS) · [04 — Design system](./04-design-system-ui.md) · [08 — Consumo de API](./08-consumo-api-dados.md)
+- Backend: [`../../backend/docs/06-multi-tenancy.md`](../../backend/docs/06-multi-tenancy.md) · [`../../backend/docs/09-modulos-dominio.md`](../../backend/docs/09-modulos-dominio.md)

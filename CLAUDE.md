@@ -124,7 +124,21 @@ yarn build && yarn start   # produção (standalone)
 - [ ] Branch `feat/HUB-N-<slug>`; todos os commits prefixados com `HUB-N:`.
 - [ ] PR com título `HUB-N: <título>` referenciando a issue (com `Fixes HUB-N` na descrição).
 
-## 11. Índice da documentação
+## 11. Consulta ao legado (base de conhecimento)
+
+> Alvo é **equivalência funcional** (§1). Antes de reimplementar uma tela/fluxo, consulte **como o legado fazia**.
+
+- **Fonte legada:** CakePHP 2.x em `C:\projetos\wecorp\app` — **telas** em views `.ctp` (`app/View/**`, `app/Plugin/*/View/**`) + a lógica de controller/model correspondente. É **read-only** — **MUST NOT** escrever lá.
+- **Base de conhecimento (on-demand):** [`docs/legado/`](./docs/legado/README.md) — **um dossiê por domínio/módulo de tela**, com fluxos, campos/validações, máscaras, comportamento por grupo e gotchas.
+- **Ordem de consulta ao pegar uma issue:**
+  1. [`docs/legado/README.md`](./docs/legado/README.md) → abra **só o dossiê do módulo** da issue.
+  2. Matriz de rastreabilidade do backend ([`../backend/docs/parity-matrix.md`](../backend/docs/parity-matrix.md)) → controller/view legados exatos.
+  3. Dúvida profunda → **`/legacy-lookup "<pergunta>"`** (explora o legado em subagente; resposta concisa; pode persistir como dossiê).
+  4. Só então `Grep`/`Read` nas `.ctp`/controllers.
+- **MUST NOT ler/indexar:** `**/Vendor/**`, `lib/Cake/**`, `*~`, `*-bkp.*`, `*.zip`, `frontend.{html,md}`.
+- **Anti-context-rot:** referência **on-demand** — não auto-carregada; **um dossiê por tarefa**.
+
+## 12. Índice da documentação
 
 Comece por [`docs/README.md`](./docs/README.md). Mapa rápido:
 
@@ -148,3 +162,4 @@ Comece por [`docs/README.md`](./docs/README.md). Mapa rápido:
 | Roadmap e fases (Linear) | [docs/15](./docs/15-roadmap-fases.md) |
 | Glossário | [docs/16](./docs/16-glossario.md) |
 | Paridade e portal público | [docs/17](./docs/17-paridade-portal-publico.md) |
+| Base de conhecimento legado (dossiês de telas) | [docs/legado/README.md](./docs/legado/README.md) |
